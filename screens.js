@@ -1,134 +1,77 @@
-// File: screens.js - Màn hình mô phỏng 3D góc nhìn + Radar nhìn từ trên xuống
+// File: screens.js - Chụp dữ liệu block + vị trí gửi cho trình duyệt tự vẽ
+const R = 16;     // bán kính ngang
+const DOWN = 8;   // số block phía dưới chân
+const UP = 8;     // số block phía trên chân
+const SX = R * 2 + 1;
+const SZ = R * 2 + 1;
+const SY = DOWN + UP + 1;
 
-// ---------- MÀN HÌNH 1: GÓC NHÌN NGƯỜI CHƠI (bắn tia bằng ký tự) ----------
-const VIEW_W = 56;
-const VIEW_H = 20;
-const FOV_H = 80 * Math.PI / 180;
-const FOV_V = FOV_H * (VIEW_H / VIEW_W) * 2;
-const MAX_DIST = 15;
-const STEP = 0.35;
-const WALL_CHARS = '@#%*=-:.';
-const FLOOR_CHARS = '%*+=-:,.';
-
-function shade(chars, dist) {
-  const i = Math.min(chars.length - 1, Math.floor((dist / MAX_DIST) * chars.length));
-  return chars[i];
+// 0 = trống, 1 đá, 2 đất, 3 cỏ, 4 cát, 5 gỗ thân, 6 ván gỗ,
+// 7 lá, 8 nước, 9 dung nham, 10 tuyết/băng, 11 block khác
+function classify(b) {
+  if (!b) return 0;
+  const n = b.name;
+  if (n === 'air' || n === 'cave_air' || n === 'void_air') return 0;
+  if (n === 'water') return 8;
+  if (n === 'lava') return 9;
+  if (b.boundingBox !== 'block') return 0; // cỏ dại, hoa, đuốc... coi như trống
+  if (n.includes('leaves')) return 7;
+  if (n === 'grass_block') return 3;
+  if (n.includes('plank')) return 6;
+  if (n.includes('log') || n.includes('wood')) return 5;
+  if (n.includes('sand')) return 4;
+  if (n.includes('snow') || n.includes('ice')) return 10;
+  if (n.includes('dirt') || n.includes('path') || n.includes('mud') ||
+      n.includes('farmland') || n.includes('podzol') || n.includes('mycelium') || n.includes('clay')) return 2;
+  if (n.includes('stone') || n.includes('deepslate') || n.includes('andesite') ||
+      n.includes('granite') || n.includes('diorite') || n.includes('bedrock') ||
+      n.includes('_ore') || n.includes('tuff') || n.includes('basalt')) return 1;
+  return 11;
 }
 
-function renderView(b) {
-  if (!b || !b.entity) return 'Bot chưa vào game...';
-  const eye = b.entity.position.offset(0, 1.62, 0);
-  const yaw = b.entity.yaw;
-  const pitch = b.entity.pitch;
-  const lines = [];
-
-  for (let r = 0; r < VIEW_H; r++) {
-    const rp = pitch + (0.5 - (r + 0.5) / VIEW_H) * FOV_V;
-    const cp = Math.cos(rp);
-    const dy = Math.sin(rp);
-    let line = '';
-
-    for (let c = 0; c < VIEW_W; c++) {
-      const a = ((c + 0.5) / VIEW_W - 0.5) * FOV_H;
-      const ry = yaw - a;
-      const dx = -Math.sin(ry) * cp;
-      const dz = -Math.cos(ry) * cp;
-
-      let ch = ' ';
-      let pfx = Math.floor(eye.x), pfy = Math.floor(eye.y), pfz = Math.floor(eye.z);
-
-      for (let d = STEP; d <= MAX_DIST; d += STEP) {
-        const blk = b.blockAt(eye.offset(dx * d, dy * d, dz * d));
-        if (!blk) continue;
-
-        const fx = Math.floor(eye.x + dx * d);
-        const fy = Math.floor(eye.y + dy * d);
-        const fz = Math.floor(eye.z + dz * d);
-
-        if (blk.name.includes('water')) { ch = '~'; break; }
-        if (blk.name.includes('lava')) { ch = '!'; break; }
-        if (blk.boundingBox === 'block') {
-          const isFlatFace = (fy !== pfy && fx === pfx && fz === pfz);
-          ch = isFlatFace ? shade(FLOOR_CHARS, d) : shade(WALL_CHARS, d);
-          break;
-        }
-        pfx = fx; pfy = fy; pfz = fz;
+function takeSnapshot(bot) {
+  if (!bot || !bot.entity) return null;
+  const p = bot.entity.position;
+  const ox = Math.floor(p.x) - R;
+  const oy = Math.floor(p.y) - DOWN;
+  const oz = Math.floor(p.z) - R;
+  const data = Buffer.alloc(SX * SY * SZ);
+  const pt = p.clone();
+  for (let y = 0; y < SY; y++) {
+    for (let z = 0; z < SZ; z++) {
+      for (let x = 0; x < SX; x++) {
+        pt.x = ox + x;
+        pt.y = oy + y;
+        pt.z = oz + z;
+        data[(y * SZ + z) * SX + x] = classify(bot.blockAt(pt, false));
       }
-      line += ch;
-    }
-    lines.push(line);
-  }
-  return lines.join('\n');
-}
-
-// ---------- MÀN HÌNH 2: RADAR NHÌN TỪ TRÊN XUỐNG ----------
-const RADIUS = 8;
-
-function blockChar(name) {
-  if (name.includes('water')) return '~';
-  if (name.includes('lava')) return '!';
-  if (name.includes('leaves')) return '%';
-  if (name.includes('log') || name.includes('wood')) return '|';
-  if (name.includes('sand')) return ':';
-  if (name.includes('snow') || name.includes('ice')) return '*';
-  if (name.includes('grass') || name.includes('fern')) return '.';
-  if (name.includes('dirt') || name.includes('path') || name.includes('mud')) return ',';
-  if (name.includes('stone') || name.includes('deepslate') || name.includes('ore')) return '=';
-  return '+';
-}
-
-function topBlock(b, base, dx, dz) {
-  for (let dy = 3; dy >= -4; dy--) {
-    const blk = b.blockAt(base.offset(dx, dy, dz));
-    if (blk && blk.name !== 'air' && blk.name !== 'cave_air' && blk.name !== 'void_air') {
-      return { block: blk, dy };
     }
   }
-  return null;
+  return { ox, oy, oz, sx: SX, sy: SY, sz: SZ, data };
 }
 
-function facing(yaw) {
-  const deg = ((yaw * 180) / Math.PI + 360) % 360;
-  const dirs = ['Bắc', 'Tây', 'Nam', 'Đông'];
-  return dirs[Math.round(deg / 90) % 4];
-}
+const r2 = (v) => Math.round(v * 100) / 100;
 
-function renderRadar(b) {
-  if (!b || !b.entity) return 'Bot chưa vào game...';
-  const base = b.entity.position.floored();
-
-  const marks = new Map();
-  for (const id in b.entities) {
-    const e = b.entities[id];
-    if (!e || e === b.entity || !e.position) continue;
-    const dx = Math.floor(e.position.x) - base.x;
-    const dz = Math.floor(e.position.z) - base.z;
-    if (Math.abs(dx) > RADIUS || Math.abs(dz) > RADIUS) continue;
-    if (e.type === 'player') marks.set(dx + ',' + dz, 'P');
-    else if (e.type === 'mob' || e.type === 'hostile') marks.set(dx + ',' + dz, 'M');
+// Vị trí + hướng nhìn + thực thể xung quanh (gửi 27 lần/giây nên làm gọn)
+function getPose(bot) {
+  if (!bot || !bot.entity) return null;
+  const p = bot.entity.position;
+  const ents = [];
+  for (const id in bot.entities) {
+    const e = bot.entities[id];
+    if (!e || e === bot.entity || !e.position) continue;
+    const dx = e.position.x - p.x;
+    const dz = e.position.z - p.z;
+    if (dx * dx + dz * dz > 400 || Math.abs(e.position.y - p.y) > 16) continue;
+    let t = -1;
+    if (e.type === 'player') t = 0;
+    else if (e.type === 'hostile') t = 1;
+    else if (e.type === 'mob' || e.type === 'animal' || e.type === 'passive' || e.type === 'living') t = 2;
+    if (t < 0) continue;
+    ents.push([r2(e.position.x), r2(e.position.y), r2(e.position.z), t, e.username || '']);
+    if (ents.length >= 40) break;
   }
-
-  const lines = [];
-  for (let dz = -RADIUS; dz <= RADIUS; dz++) {
-    const row = [];
-    for (let dx = -RADIUS; dx <= RADIUS; dx++) {
-      let ch;
-      if (dx === 0 && dz === 0) ch = '@';
-      else if (marks.has(dx + ',' + dz)) ch = marks.get(dx + ',' + dz);
-      else {
-        const t = topBlock(b, base, dx, dz);
-        if (!t) ch = ' ';
-        else if (t.dy >= 1 && !t.block.name.includes('water')) ch = '#';
-        else ch = blockChar(t.block.name);
-      }
-      row.push(ch);
-    }
-    lines.push(row.join(' '));
-  }
-
-  const header = 'Hướng nhìn: ' + facing(b.entity.yaw) + '  |  Bắc ↑\n';
-  const legend = '\n@ Bot  P Người  M Mob  # Tường  . Cỏ  , Đất  = Đá  ~ Nước  ! Dung nham  | Gỗ  % Lá  : Cát';
-  return header + lines.join('\n') + legend;
+  return { x: r2(p.x), y: r2(p.y), z: r2(p.z), yaw: r2(bot.entity.yaw), pitch: r2(bot.entity.pitch), ents };
 }
 
-module.exports = { renderView, renderRadar };
+module.exports = { takeSnapshot, getPose };
