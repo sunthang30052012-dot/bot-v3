@@ -1,0 +1,14 @@
+{
+  "name": "bot-king-legacy",
+  "version": "1.0.0",
+  "description": "Bot farm Minecraft King Legacy 24/7",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "mineflayer": "^4.20.0",
+    "express": "^4.19.0",
+    "socket.io": "^4.7.5"
+  }
+}
